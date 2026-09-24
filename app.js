@@ -427,12 +427,11 @@ function setActivePoint(index, centerMap = false) {
 }
 
 function highlightTableRow(index) {
-  const rows = document.querySelectorAll('#logTableBody tr');
-  rows.forEach(r => r.classList.remove('active-point'));
+  const prev = document.querySelector('#logTableBody tr.active-point');
+  if (prev) prev.classList.remove('active-point');
   const activeRow = document.getElementById(`row-${index}`);
   if (activeRow) {
     activeRow.classList.add('active-point');
-    activeRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 }
 
