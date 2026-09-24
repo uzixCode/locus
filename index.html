@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Locus GPS Telemetry Viewer</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- PapaParse for CSV parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-cyan-500 selection:text-black">
+
+  <!-- Header -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+          <i data-lucide="navigation" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg leading-tight tracking-tight text-white flex items-center gap-2">
+            Locus Telemetry
+            <span class="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">GPS Viewer</span>
+          </h1>
+          <p id="trackDate" class="text-xs text-slate-400">No file loaded</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <input type="file" id="csvFileInput" accept=".csv,.txt" class="hidden">
+        <button id="uploadBtn" class="px-3.5 py-2 text-xs sm:text-sm font-medium bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition flex items-center gap-2 shadow-sm shadow-cyan-600/30">
+          <i data-lucide="upload" class="w-4 h-4"></i>
+          <span>Upload CSV</span>
+        </button>
+
+        <button id="exportGpxBtn" class="px-3 py-2 text-xs sm:text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition flex items-center gap-2" title="Export as GPX">
+          <i data-lucide="download" class="w-4 h-4 text-emerald-400"></i>
+          <span class="hidden sm:inline">GPX</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- Drag & Drop Dropzone Overlay (Hidden by default) -->
+    <div id="dropZone" class="hidden border-2 border-dashed border-cyan-500/60 bg-cyan-950/40 rounded-2xl p-8 text-center transition-all">
+      <div class="flex flex-col items-center justify-center gap-2 pointer-events-none">
+        <i data-lucide="file-up" class="w-12 h-12 text-cyan-400 animate-bounce"></i>
+        <p class="text-base font-semibold text-white">Drop your CSV telemetry file here</p>
+        <p class="text-xs text-slate-400">Supports LocalDate, LocalTime, Latitude, Longitude, Altitude, Speed</p>
+      </div>
+    </div>
+
+    <!-- KPI Summary Grid -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <!-- Distance -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+          <span>Distance</span>
+          <i data-lucide="route" class="w-4 h-4 text-cyan-400"></i>
+        </div>
+        <div class="text-xl font-bold text-white tracking-tight" id="kpiDistance">0.00 <span class="text-xs font-normal text-slate-400">km</span></div>
+        <div class="text-[10px] text-slate-500 mt-1" id="kpiPointCount">0 points</div>
+      </div>
+
+      <!-- Duration -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+          <span>Duration</span>
+          <i data-lucide="clock" class="w-4 h-4 text-blue-400"></i>
+        </div>
+        <div class="text-xl font-bold text-white tracking-tight" id="kpiDuration">00:00:00</div>
+        <div class="text-[10px] text-slate-500 mt-1" id="kpiTimeSpan">--:--:-- - --:--:--</div>
+      </div>
+
+      <!-- Max Speed -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+          <span>Max Speed</span>
+          <i data-lucide="gauge" class="w-4 h-4 text-emerald-400"></i>
+        </div>
+        <div class="text-xl font-bold text-white tracking-tight" id="kpiMaxSpeed">0.0 <span class="text-xs font-normal text-slate-400">km/h</span></div>
+        <div class="text-[10px] text-slate-500 mt-1" id="kpiAvgSpeed">Avg: 0.0 km/h</div>
+      </div>
+
+      <!-- Altitude Span -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+          <span>Altitude Range</span>
+          <i data-lucide="mountain" class="w-4 h-4 text-amber-400"></i>
+        </div>
+        <div class="text-xl font-bold text-white tracking-tight" id="kpiAltRange">0 - 0 <span class="text-xs font-normal text-slate-400">m</span></div>
+        <div class="text-[10px] text-slate-500 mt-1" id="kpiElevGain">Gain: +0m | Loss: -0m</div>
+      </div>
+
+      <!-- Satellites -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+          <span>Satellites</span>
+          <i data-lucide="satellite" class="w-4 h-4 text-purple-400"></i>
+        </div>
+        <div class="text-xl font-bold text-white tracking-tight" id="kpiSats">0 <span class="text-xs font-normal text-slate-400">avg</span></div>
+        <div class="text-[10px] text-slate-500 mt-1" id="kpiSatsRange">Min: 0 | Max: 0</div>
+      </div>
+
+      <!-- HDOP -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-medium mb-1">
+          <span>Accuracy (HDOP)</span>
+          <i data-lucide="crosshair" class="w-4 h-4 text-rose-400"></i>
+        </div>
+        <div class="text-xl font-bold text-white tracking-tight" id="kpiHdop">0.00</div>
+        <div class="text-[10px] text-slate-500 mt-1" id="kpiHdopQuality">Excellent</div>
+      </div>
+    </div>
+
+    <!-- Map & Side Details Layout -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Map Container (2 Cols) -->
+      <div class="lg:col-span-2 bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden flex flex-col shadow-xl">
+
+        <!-- Map Control Bar -->
+        <div class="px-4 py-3 border-b border-slate-800/80 bg-slate-950/40 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+              <i data-lucide="map-pin" class="w-3.5 h-3.5 text-cyan-400"></i>
+              Track Map
+            </span>
+            <span id="mapStatusBadge" class="text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full">Awaiting Data</span>
+          </div>
+
+          <!-- Color Mode & Map Actions -->
+          <div class="flex items-center gap-2 text-xs">
+            <label class="text-slate-400">Color by:</label>
+            <select id="colorModeSelect" class="bg-slate-800 border border-slate-700 text-slate-200 rounded-md px-2 py-1 focus:ring-1 focus:ring-cyan-500 focus:outline-none">
+              <option value="speed">Speed (km/h)</option>
+              <option value="altitude">Altitude (m)</option>
+              <option value="hdop">HDOP Quality</option>
+              <option value="solid">Solid Cyan</option>
+            </select>
+
+            <button id="fitBoundsBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-md border border-slate-700 transition" title="Center on Track">
+              <i data-lucide="maximize" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Leaflet Map Element -->
+        <div id="map" class="w-full h-[460px] bg-slate-950 relative z-0"></div>
+
+        <!-- Playback & Scrubber Controls -->
+        <div class="p-4 border-t border-slate-800/80 bg-slate-950/70 flex flex-col gap-3">
+          <div class="flex items-center justify-between text-xs text-slate-400 font-mono">
+            <div class="flex items-center gap-2">
+              <button id="playPauseBtn" class="w-8 h-8 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white flex items-center justify-center transition shadow-sm">
+                <i data-lucide="play" id="playIcon" class="w-4 h-4 ml-0.5"></i>
+              </button>
+              <button id="stopBtn" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition border border-slate-700">
+                <i data-lucide="square" class="w-3.5 h-3.5"></i>
+              </button>
+              <select id="speedMultiplierSelect" class="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-md px-2 py-1">
+                <option value="1">1x</option>
+                <option value="2">2x</option>
+                <option value="5" selected>5x</option>
+                <option value="10">10x</option>
+                <option value="25">25x</option>
+              </select>
+            </div>
+
+            <div class="flex items-center gap-4 text-xs">
+              <span id="currentPointTime" class="text-cyan-400 font-bold">--:--:--</span>
+              <span class="text-slate-500">|</span>
+              <span id="currentPointProgress">Pt 0 / 0</span>
+            </div>
+          </div>
+
+          <!-- Slider timeline -->
+          <div class="relative flex items-center">
+            <input type="range" id="timelineSlider" min="0" max="100" value="0" step="1"
+              class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500 focus:outline-none">
+          </div>
+        </div>
+      </div>
+
+      <!-- Point Inspector & Telemetry Gauge Panel (1 Col) -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col justify-between shadow-xl space-y-4">
+        <div>
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 class="font-semibold text-sm text-white flex items-center gap-2">
+              <i data-lucide="activity" class="w-4 h-4 text-cyan-400"></i>
+              Active Point Inspector
+            </h3>
+          </div>
+
+          <!-- Active point metric list -->
+          <div class="grid grid-cols-2 gap-3 mt-4">
+            <div class="bg-slate-950/60 rounded-xl p-3 border border-slate-800/80">
+              <span class="text-[11px] text-slate-400 block mb-1">Time</span>
+              <span id="inspTime" class="text-sm font-mono font-bold text-cyan-300">--:--:--</span>
+            </div>
+
+            <div class="bg-slate-950/60 rounded-xl p-3 border border-slate-800/80">
+              <span class="text-[11px] text-slate-400 block mb-1">Speed</span>
+              <span id="inspSpeed" class="text-sm font-mono font-bold text-emerald-400">0.00 km/h</span>
+            </div>
+
+            <div class="bg-slate-950/60 rounded-xl p-3 border border-slate-800/80">
+              <span class="text-[11px] text-slate-400 block mb-1">Altitude</span>
+              <span id="inspAlt" class="text-sm font-mono font-bold text-amber-400">0.0 m</span>
+            </div>
+
+            <div class="bg-slate-950/60 rounded-xl p-3 border border-slate-800/80">
+              <span class="text-[11px] text-slate-400 block mb-1">Satellites</span>
+              <span id="inspSats" class="text-sm font-mono font-bold text-purple-400">0</span>
+            </div>
+
+            <div class="bg-slate-950/60 rounded-xl p-3 border border-slate-800/80">
+              <span class="text-[11px] text-slate-400 block mb-1">HDOP</span>
+              <span id="inspHdop" class="text-sm font-mono font-bold text-rose-400">0.00</span>
+            </div>
+
+            <div class="bg-slate-950/60 rounded-xl p-3 border border-slate-800/80">
+              <span class="text-[11px] text-slate-400 block mb-1">Cumulative Dist</span>
+              <span id="inspDist" class="text-sm font-mono font-bold text-blue-400">0.00 km</span>
+            </div>
+          </div>
+
+          <div class="mt-4 bg-slate-950/60 rounded-xl p-3 border border-slate-800/80">
+            <span class="text-[11px] text-slate-400 block mb-1">Coordinates</span>
+            <div class="text-xs font-mono text-slate-200 flex items-center justify-between">
+              <span id="inspCoords">Lat: --, Lng: --</span>
+              <button id="copyCoordsBtn" class="text-slate-400 hover:text-cyan-400 p-1 rounded" title="Copy Coords">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Legend / Color scale -->
+        <div class="bg-slate-950/40 rounded-xl p-3 border border-slate-800/60">
+          <span class="text-[11px] font-medium text-slate-400 block mb-2" id="legendTitle">Track Gradient Legend</span>
+          <div id="gradientBar" class="h-2.5 rounded-full w-full bg-gradient-to-r from-blue-500 via-emerald-400 to-rose-500 mb-1"></div>
+          <div class="flex justify-between text-[10px] font-mono text-slate-400">
+            <span id="legendMin">0 km/h</span>
+            <span id="legendMid">Avg</span>
+            <span id="legendMax">10 km/h</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Charts Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- Altitude Profile Chart -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-sm text-white flex items-center gap-2">
+            <i data-lucide="mountain-snow" class="w-4 h-4 text-amber-400"></i>
+            Elevation Profile
+          </h3>
+          <span class="text-xs font-mono text-amber-400/90" id="chartAltStats">--</span>
+        </div>
+        <div class="h-64 relative">
+          <canvas id="altitudeChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Speed Profile Chart -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-sm text-white flex items-center gap-2">
+            <i data-lucide="zap" class="w-4 h-4 text-emerald-400"></i>
+            Speed & Satellite Count Over Time
+          </h3>
+          <span class="text-xs font-mono text-emerald-400/90" id="chartSpeedStats">--</span>
+        </div>
+        <div class="h-64 relative">
+          <canvas id="speedChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Table Section -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+      <div class="p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <i data-lucide="table" class="w-4 h-4 text-cyan-400"></i>
+          <h3 class="font-semibold text-sm text-white">Log Records Table</h3>
+          <span id="tableRecordCount" class="text-xs font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">0 rows</span>
+        </div>
+
+        <div class="flex items-center gap-2 text-xs">
+          <input type="text" id="tableSearchInput" placeholder="Filter by time, speed..."
+            class="bg-slate-950 border border-slate-800 text-slate-200 rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none w-48 sm:w-64">
+        </div>
+      </div>
+
+      <div class="overflow-x-auto max-h-80 overflow-y-auto" id="tableScrollContainer">
+        <table class="w-full text-left text-xs font-mono border-collapse">
+          <thead class="bg-slate-950 text-slate-400 sticky top-0 border-b border-slate-800 z-10">
+            <tr>
+              <th class="p-3">#</th>
+              <th class="p-3">Date</th>
+              <th class="p-3">Time</th>
+              <th class="p-3">Latitude</th>
+              <th class="p-3">Longitude</th>
+              <th class="p-3">Alt (m)</th>
+              <th class="p-3">Speed (km/h)</th>
+              <th class="p-3">Sats</th>
+              <th class="p-3">HDOP</th>
+            </tr>
+          </thead>
+          <tbody id="logTableBody" class="divide-y divide-slate-800/60 text-slate-300">
+            <tr>
+              <td colspan="9" class="p-8 text-center text-slate-500 font-sans text-xs">
+                No telemetry data loaded. Upload a CSV file to inspect points.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-900 bg-slate-950/80 py-4 mt-8 text-center text-xs text-slate-500">
+    Locus Telemetry Dashboard &bull; Static Web Visualization &bull; Leaflet & Chart.js
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
